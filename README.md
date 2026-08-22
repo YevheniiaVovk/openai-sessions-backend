@@ -109,3 +109,45 @@ openai-sessions-backend/
 ├── uv.lock                      # Lock-файл залежностей
 └── README.md                    # Документація проєкту
 ```
+---
+
+## 🧪 API Examples
+
+### 1. Create Session
+```bash
+curl -X 'POST' \
+  'http://localhost:8000/api/v1/sessions' \
+  -H 'accept: application/json' \
+  -H 'Authorization: Bearer <YOUR_JWT_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "gpt-5.6-terra"
+  }'
+```
+
+### 2. Send Message
+```bash
+curl -X 'POST' \
+  'http://localhost:8000/api/v1/sessions/<SESSION_ID>/messages' \
+  -H 'accept: application/json' \
+  -H 'Authorization: Bearer <YOUR_JWT_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "content": "Розкажи щось про Місяць"
+  }'
+```
+### 3. Get Session History
+```bash
+curl -X 'GET' \
+  'http://localhost:8000/api/v1/sessions/<SESSION_ID>' \
+  -H 'accept: application/json' \
+  -H 'Authorization: Bearer <YOUR_JWT_TOKEN>'
+```
+
+---
+
+## ⚠️ Known Limitations & Out of Scope
+
+- **Streaming:** відповіді повертаються цілісним JSON-об'єктом.
+- **Пагінація:** ендпоінт історії повертає весь список повідомлень сесії.
+- **Типи usage:** підраховуються лише `input` та `output` токени.

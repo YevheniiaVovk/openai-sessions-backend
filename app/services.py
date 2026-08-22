@@ -1,14 +1,14 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from google import genai
 
 from app.config import settings
 from app.models import SessionModel, MessageModel
 
-# Cost Estimate (General)
 def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     pricing = settings.MODEL_PRICING.get(model, settings.MODEL_PRICING["gpt-5.6-terra"])
     input_cost = (input_tokens / 1000) * pricing["input"]
@@ -19,13 +19,11 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 class BaseLLMService(ABC):
     @abstractmethod
     async def generate_response(self, model_name: str, messages: list) -> Tuple[str, int, int]:
-        """Return (text_response, input_tokens, output_tokens)"""
         pass
 
 
 class GeminiLLMService(BaseLLMService):
     def __init__(self):
-        # google-genai
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
     async def generate_response(self, model_name: str, messages: list) -> Tuple[str, int, int]:
@@ -46,8 +44,8 @@ class GeminiLLMService(BaseLLMService):
                 config={"system_instruction": system_instruction} if system_instruction else None
             )
 
-            in_tokens = response.usage_metadata.prompt_token_count or 0
-            out_tokens = response.usage_metadata.candidates_token_count or 0
+            in_tokens = getattr(response.usage_metadata, "prompt_token_count", 0) or 0
+            out_tokens = getattr(response.usage_metadata, "candidates_token_count", 0) or 0
             text = response.text or ""
 
             return text, in_tokens, out_tokens
@@ -55,7 +53,6 @@ class GeminiLLMService(BaseLLMService):
             raise HTTPException(status_code=502, detail=f"LLM Provider Error: {str(e)}")
 
 
-# A ready-to-use class for OpenAI (in case the testers want to substitute their own OPENAI_API_KEY)
 class OpenAILLMService(BaseLLMService):
     def __init__(self):
         from openai import AsyncOpenAI
@@ -67,22 +64,35 @@ class OpenAILLMService(BaseLLMService):
                 model=model_name,
                 messages=messages
             )
-            text = response.choices[0].message.content
-            in_tokens = response.usage.prompt_tokens
-            out_tokens = response.usage.completion_tokens
+            text = response.choices[0].message.content or ""
+            in_tokens = response.usage.prompt_tokens if response.usage else 0
+            out_tokens = response.usage.completion_tokens if response.usage else 0
             return text, in_tokens, out_tokens
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"OpenAI API error: {str(e)}")
 
 
-# Choosing a Provider
 def get_llm_service() -> BaseLLMService:
     if settings.USE_GEMINI_PROVIDER:
         return GeminiLLMService()
     return OpenAILLMService()
 
 
-async def process_chat(db: AsyncSession, session_obj: SessionModel, user_content: str):
+async def process_chat(db: AsyncSession, session_obj: SessionModel, user_id: str, user_content: str):
+    if session_obj.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this session")
+
+    
+    user_msg = MessageModel(
+        session_id=session_obj.id,
+        role="user",
+        content=user_content
+    )
+    db.add(user_msg)
+    await db.commit()
+    await db.refresh(user_msg)
+
+    
     stmt = (
         select(MessageModel)
         .where(MessageModel.session_id == session_obj.id)
@@ -93,20 +103,20 @@ async def process_chat(db: AsyncSession, session_obj: SessionModel, user_content
     history = list(reversed(result.scalars().all()))
 
     openai_messages = [{"role": msg.role, "content": msg.content} for msg in history]
-    openai_messages.append({"role": "user", "content": user_content})
 
+    
     llm = get_llm_service()
-    assistant_content, in_tokens, out_tokens = await llm.generate_response(
-        session_obj.model, openai_messages
+    model_name = str(session_obj.model)
+    assistant_content, in_tokens_raw, out_tokens_raw = await llm.generate_response(
+        model_name, openai_messages
     )
 
-    cost = calculate_cost(session_obj.model, in_tokens, out_tokens)
+    in_tokens = int(in_tokens_raw or 0)
+    out_tokens = int(out_tokens_raw or 0)
 
-    user_msg = MessageModel(
-        session_id=session_obj.id,
-        role="user",
-        content=user_content
-    )
+    cost = calculate_cost(model_name, in_tokens, out_tokens)
+
+    
     assistant_msg = MessageModel(
         session_id=session_obj.id,
         role="assistant",
@@ -116,13 +126,15 @@ async def process_chat(db: AsyncSession, session_obj: SessionModel, user_content
         message_cost=cost
     )
     
-    session_obj.total_tokens += (in_tokens + out_tokens)
-    session_obj.total_cost += cost
+    
+    current_tokens = int(session_obj.total_tokens or 0)
+    current_cost = float(session_obj.total_cost or 0)
 
-    db.add(user_msg)
+    session_obj.total_tokens = current_tokens + in_tokens + out_tokens
+    session_obj.total_cost = current_cost + cost
+
     db.add(assistant_msg)
     await db.commit()
-    await db.refresh(user_msg)
     await db.refresh(assistant_msg)
 
     return user_msg, assistant_msg
