@@ -1,0 +1,36 @@
+# Python / Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables 
+.env
+.env.local
+.env.*.local
+
+# Databases & local storage
+*.sqlite
+*.sqlite3
+*.db
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker / Local logs
+*.log
+docker-compose.override.yml
+
+# Pytest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Mypy cache
+.mypy_cache/

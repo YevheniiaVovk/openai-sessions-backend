@@ -1,0 +1,14 @@
+[project]
+name = "openai-sessions-backend"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "aiomysql>=0.3.2",
+    "cryptography>=50.0.0",
+    "fastapi>=0.141.1",
+    "google-genai>=2.19.0",
+    "openai>=3.3.1",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2.0.52",
+    "uvicorn>=0.52.4",
+]
