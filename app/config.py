@@ -34,7 +34,7 @@ class Settings(BaseSettings):
             "input": 0.00075,
             "output": 0.003,
         },
-        "gemini-3.6-flash-lite": {
+        "gemini-3.5-flash-lite": {
             "input": 0.0001,
             "output": 0.0004,
         },

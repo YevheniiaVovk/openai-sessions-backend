@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class SessionCreate(BaseModel):
-    model: Optional[str] = "gpt-5.6-terra"
+    model: Optional[str] = None
 
 
 class SessionResponse(BaseModel):
@@ -21,6 +21,7 @@ class SessionResponse(BaseModel):
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1, description="Content cannot be empty")
     model: Optional[str] = None  
+    stream: bool = False  
 
 
 class MessageItem(BaseModel):
