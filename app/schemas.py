@@ -20,6 +20,7 @@ class SessionResponse(BaseModel):
 
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1, description="Content cannot be empty")
+    model: Optional[str] = None  
 
 
 class MessageItem(BaseModel):
@@ -54,3 +55,10 @@ class SessionDetailResponse(BaseModel):
     messages: List[MessageItem]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ResetSessionResponse(BaseModel):
+    session_id: str
+    message: str
+    total_tokens: int
+    total_cost: float

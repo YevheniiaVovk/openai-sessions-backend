@@ -41,6 +41,13 @@ async def create_session(
     db: AsyncSession = Depends(get_db)
 ):
     model = payload.model or settings.DEFAULT_MODEL
+    
+    if model not in settings.MODEL_PRICING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Model '{model}' is not supported. Available models: {list(settings.MODEL_PRICING.keys())}"
+        )
+    
     new_session = SessionModel(user_id=user_id, model=model)
     db.add(new_session)
     await db.commit()
@@ -62,7 +69,10 @@ async def send_message(
     if not session_obj:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    user_msg, assistant_msg = await services.process_chat(db, session_obj, user_id, payload.content)
+    
+    user_msg, assistant_msg = await services.process_chat(
+        db, session_obj, user_id, payload.content, payload.model
+    )
 
     return {
         "user_message": user_msg,
@@ -71,6 +81,35 @@ async def send_message(
             "total_tokens": session_obj.total_tokens,
             "total_cost": session_obj.total_cost
         }
+    }
+
+
+
+@router.post("/sessions/{session_id}/reset", response_model=schemas.ResetSessionResponse)
+async def reset_session(
+    session_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reset session context—increments the generation and clears the context.
+    The session ID remains the same, but the generation increases.
+    """
+    stmt = select(SessionModel).where(SessionModel.id == session_id)
+    result = await db.execute(stmt)
+    session_obj = result.scalar_one_or_none()
+    
+    if not session_obj:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    
+    await services.reset_session_generation(db, session_obj, user_id)
+    
+    return {
+        "session_id": session_id,
+        "message": f"Session reset. Generation incremented to {session_obj.generation}",
+        "total_tokens": session_obj.total_tokens,
+        "total_cost": session_obj.total_cost
     }
 
 
@@ -94,5 +133,9 @@ async def get_session_history(
     if session_obj.user_id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this session")
 
-    session_obj.messages.sort(key=lambda m: m.created_at)
+    
+    active_messages = [msg for msg in session_obj.messages if msg.generation == session_obj.generation]
+    active_messages.sort(key=lambda m: m.created_at)
+    session_obj.messages = active_messages
+    
     return session_obj

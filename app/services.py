@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Tuple
+from typing import Tuple, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from fastapi import HTTPException, status
@@ -10,7 +10,14 @@ from app.config import settings
 from app.models import SessionModel, MessageModel
 
 def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    pricing = settings.MODEL_PRICING.get(model, settings.MODEL_PRICING["gpt-5.6-terra"])
+
+    if model not in settings.MODEL_PRICING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Model '{model}' is not supported. Available models: {list(settings.MODEL_PRICING.keys())}"
+        )
+    
+    pricing = settings.MODEL_PRICING[model]
     input_cost = (input_tokens / 1000) * pricing["input"]
     output_cost = (output_tokens / 1000) * pricing["output"]
     return round(input_cost + output_cost, 6)
@@ -78,15 +85,43 @@ def get_llm_service() -> BaseLLMService:
     return OpenAILLMService()
 
 
-async def process_chat(db: AsyncSession, session_obj: SessionModel, user_id: str, user_content: str):
+
+async def reset_session_generation(db: AsyncSession, session_obj: SessionModel, user_id: str) -> None:
+    """Increments the generation, clears the context"""
+    if session_obj.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    
+    session_obj.generation += 1
+    session_obj.total_tokens = 0
+    session_obj.total_cost = 0.0
+    await db.commit()
+
+
+async def process_chat(
+    db: AsyncSession, 
+    session_obj: SessionModel, 
+    user_id: str, 
+    user_content: str,
+    custom_model: Optional[str] = None  
+):
     if session_obj.user_id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this session")
 
     
+    model_to_use = custom_model or session_obj.model
+    
+    
+    if model_to_use not in settings.MODEL_PRICING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Model '{model_to_use}' is not supported. Available models: {list(settings.MODEL_PRICING.keys())}"
+        )
+    
     user_msg = MessageModel(
         session_id=session_obj.id,
         role="user",
-        content=user_content
+        content=user_content,
+        generation=session_obj.generation  
     )
     db.add(user_msg)
     await db.commit()
@@ -95,7 +130,10 @@ async def process_chat(db: AsyncSession, session_obj: SessionModel, user_id: str
     
     stmt = (
         select(MessageModel)
-        .where(MessageModel.session_id == session_obj.id)
+        .where(
+            MessageModel.session_id == session_obj.id,
+            MessageModel.generation == session_obj.generation  
+        )
         .order_by(MessageModel.created_at.desc())
         .limit(15)
     )
@@ -106,15 +144,15 @@ async def process_chat(db: AsyncSession, session_obj: SessionModel, user_id: str
 
     
     llm = get_llm_service()
-    model_name = str(session_obj.model)
     assistant_content, in_tokens_raw, out_tokens_raw = await llm.generate_response(
-        model_name, openai_messages
+        model_to_use, openai_messages  
     )
 
     in_tokens = int(in_tokens_raw or 0)
     out_tokens = int(out_tokens_raw or 0)
 
-    cost = calculate_cost(model_name, in_tokens, out_tokens)
+    
+    cost = calculate_cost(model_to_use, in_tokens, out_tokens)
 
     
     assistant_msg = MessageModel(
@@ -123,7 +161,8 @@ async def process_chat(db: AsyncSession, session_obj: SessionModel, user_id: str
         content=assistant_content,
         input_tokens=in_tokens,
         output_tokens=out_tokens,
-        message_cost=cost
+        message_cost=cost,
+        generation=session_obj.generation 
     )
     
     

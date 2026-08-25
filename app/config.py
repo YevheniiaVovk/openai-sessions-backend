@@ -13,10 +13,34 @@ class Settings(BaseSettings):
     
     DEFAULT_MODEL: str = "gpt-5.6-terra"
     
+    
     MODEL_PRICING: dict = {
+        # ===== OPENAI =====
         "gpt-5.6-terra": {
             "input": 0.002,
             "output": 0.012,
+        },
+        "gpt-4o": {
+            "input": 0.005,
+            "output": 0.015,
+        },
+        "gpt-4o-mini": {
+            "input": 0.00015,
+            "output": 0.0006,
+        },
+        
+        # ===== GEMINI =====
+        "gemini-3.6-flash": {
+            "input": 0.00075,
+            "output": 0.003,
+        },
+        "gemini-3.6-flash-lite": {
+            "input": 0.0001,
+            "output": 0.0004,
+        },
+        "gemini-3.1-pro": {
+            "input": 0.0015,
+            "output": 0.006,
         }
     }
 
